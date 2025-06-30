@@ -65,6 +65,7 @@ openpyxl
 ```bash
 git clone https://github.com/threatlabindonesia/NetFlowVisual.git
 cd NetFlowVisual
+extract lib.rar
 ```
 
 2. Make it executable (optional):
