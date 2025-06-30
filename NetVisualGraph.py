@@ -1,3 +1,4 @@
+
 import pandas as pd
 import networkx as nx
 from pyvis.network import Network
@@ -12,13 +13,13 @@ import json
 
 def banner():
     print(r"""
-███╗   ███╗ █████╗ ██████╗ ██╗ ██████╗ 
-████╗ ████║██╔══██╗██╔══██╗██║██╔════╝ 
+███╗   ███╗ █████╗ ██████╗ ██╗ ██████╗
+████╗ ████║██╔══██╗██╔══██╗██║██╔════╝
 ██╔████╔██║███████║██║  ██║██║██║  ███╗
 ██║╚██╔╝██║██╔══██║██║  ██║██║██║   ██║
 ██║ ╚═╝ ██║██║  ██║██████╔╝██║╚██████╔╝
-╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝ ╚═════╝ 
-   Netflow Graph Visualizer - Om Apip
+╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝ ╚═════╝
+Netflow Graph Visualizer - Om Apip
 """)
 
 def load_internal_subnets(iplist_path, log_path):
@@ -50,8 +51,8 @@ def inject_legend(html_path):
         "color: white; padding: 12px; border-radius: 10px; font-size: 14px;"
         "z-index: 1000; font-family: Arial, sans-serif;'>"
         "🧭 <b>Legend</b><br>"
-        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised Client</span></div>"
-        "<div>🎯 <span style='color:yellow;'>Targeted Server</span></div>"
+        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised [Outgoing Connection from Internal] </span></div>"
+        "<div>🎯 <span style='color:yellow;'>Targeted [External to Internal]</span></div>"
         "<div><span style='color:#56E39F;'>▲</span> Client IP</div>"
         "<div><span style='color:#F6AE2D;'>★</span> Server IP</div>"
         "<div><span style='color:#6EC1E4;'>■</span> Src IP</div>"
@@ -111,22 +112,25 @@ def main():
 
         for ip, role in ip_roles.items():
             cc = row.get(f'{role} CC', '') if f'{role} CC' in row else ''
+            flag = f"\n[{cc}]" if len(cc) == 2 and cc.isalpha() else ''
             hits = hit_counter[ip]
-            shape, color, status = 'dot', '#AAAAAA', ''
-            label = f"{ip}\n[{cc}]" if cc else ip
+            shape, color, status, label_prefix = 'dot', '#AAAAAA', '', ''
+            label = f"{label_prefix}{ip}".strip()
 
             if role == 'Client':
                 shape = 'triangle'
                 color = '#56E39F'
                 if ip_in_subnets(ip, internal_subnets):
                     color = 'red'
-                    status = 'Compromised Client'
+                    status = 'Compromised'
+                    label_prefix = '🔥 '
             elif role == 'Server':
                 shape = 'star'
                 color = '#F6AE2D'
                 if ip_in_subnets(ip, internal_subnets):
                     color = 'yellow'
-                    status = 'Targeted Server'
+                    status = 'Targeted'
+                    label_prefix = '🎯 '
             elif role == 'Src':
                 color = '#6EC1E4'
             elif role == 'Dest':
@@ -145,7 +149,7 @@ def main():
                 flags.append("Flagged by Threat Actor")
 
             tooltip = "\n".join(flags)
-            G.add_node(ip, label=label, title=tooltip, color=color, shape=shape)
+            G.add_node(ip, label=label_prefix + label + flag, title=tooltip, color=color, shape=shape)
             ip_metadata[ip] = {
                 "ip": ip,
                 "role": role,
