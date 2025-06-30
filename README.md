@@ -1,8 +1,8 @@
 # Netflow Visualizer - by Om Apip
 
-## 📌 Overview
-
+## Overview
 Netflow Visualizer is a powerful Python-based tool for visualizing network flow (netflow) data. It builds an interactive graph from Excel/CSV netflow logs and correlates it with an internal IP/subnet list to highlight compromised clients and targeted servers. Visual styles emulate VirusTotal's threat intelligence view, and all connections are enriched with metadata such as country, role, and flow frequency.
+
 ---
 
 ## 📸 Preview
