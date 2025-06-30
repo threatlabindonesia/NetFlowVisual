@@ -1,11 +1,14 @@
-#!/usr/bin/env python3
 import pandas as pd
 import networkx as nx
 from pyvis.network import Network
 from tqdm import tqdm
+import ipaddress
 import argparse
 import os
 import sys
+import webbrowser
+from collections import defaultdict
+import json
 
 def banner():
     print(r"""
@@ -18,28 +21,27 @@ def banner():
    Netflow Graph Visualizer - Om Apip
 """)
 
-def get_args():
-    parser = argparse.ArgumentParser(description="Visualize Netflow CSV or Excel into an interactive HTML graph with styled legend.")
-    parser.add_argument("input", help="Input CSV or Excel file")
-    parser.add_argument("--output", "-o", default="cymru_graph_legend.html", help="Output HTML path")
-    return parser.parse_args()
+def load_internal_subnets(iplist_path, log_path):
+    valid = []
+    with open(iplist_path) as f:
+        lines = f.read().splitlines()
+    with open(log_path, "w") as log:
+        for line in lines:
+            ip = line.strip()
+            try:
+                net = ipaddress.ip_network(ip if '/' in ip else ip + '/32')
+                valid.append(net)
+                log.write(f"[✓] Loaded: {ip}\n")
+            except Exception as e:
+                log.write(f"[✗] Invalid IP/subnet: {ip} ({e})\n")
+    return valid
 
-def read_file_auto(filepath):
-    ext = os.path.splitext(filepath)[-1].lower()
+def ip_in_subnets(ip, subnets):
     try:
-        if ext in ['.xls', '.xlsx']:
-            print("[*] Detected Excel format")
-            df = pd.read_excel(filepath).fillna('')
-        elif ext == '.csv':
-            print("[*] Detected CSV format")
-            df = pd.read_csv(filepath, encoding='latin1', sep=None, engine='python').fillna('')
-        else:
-            raise ValueError("Unsupported file type.")
-        df.columns = df.columns.str.strip()
-        return df
-    except Exception as e:
-        print(f"[!] Failed reading file: {e}")
-        sys.exit(1)
+        ip_obj = ipaddress.ip_address(ip)
+        return any(ip_obj in subnet for subnet in subnets)
+    except:
+        return False
 
 def inject_legend(html_path):
     legend_html = (
@@ -47,9 +49,11 @@ def inject_legend(html_path):
         "position: absolute; top: 20px; left: 20px; background-color: rgba(30,30,30,0.85);"
         "color: white; padding: 12px; border-radius: 10px; font-size: 14px;"
         "z-index: 1000; font-family: Arial, sans-serif;'>"
-        "<b>🧭 Legend</b><br>"
-        "<div style='margin-top:5px;'><span style='color:#56E39F;'>■</span> Client IP</div>"
-        "<div><span style='color:#F6AE2D;'>■</span> Server IP</div>"
+        "🧭 <b>Legend</b><br>"
+        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised Client</span></div>"
+        "<div>🎯 <span style='color:yellow;'>Targeted Server</span></div>"
+        "<div><span style='color:#56E39F;'>▲</span> Client IP</div>"
+        "<div><span style='color:#F6AE2D;'>★</span> Server IP</div>"
         "<div><span style='color:#6EC1E4;'>■</span> Src IP</div>"
         "<div><span style='color:#FF9F1C;'>■</span> Dest IP</div>"
         "<div><span style='color:#FF4040;'>■</span> Matched IP</div>"
@@ -69,81 +73,115 @@ def inject_legend(html_path):
 
 def main():
     banner()
-    args = get_args()
+    parser = argparse.ArgumentParser(description="Netflow Graph Visualizer with Compromised/Targeted IP Detection")
+    parser.add_argument("--input", required=True, help="Path to Netflow Excel/CSV file")
+    parser.add_argument("--iplist", required=True, help="Path to TXT file with internal subnets")
+    parser.add_argument("--output", default="graph_output.html", help="Output HTML path")
+    parser.add_argument("--log", default="subnet_check.log", help="Log output for IP/subnet matching")
+    parser.add_argument("--meta", default="ip_metadata.json", help="Optional export of IP metadata")
+    args = parser.parse_args()
 
-    args.input = os.path.abspath(args.input)
-    args.output = os.path.abspath(args.output)
+    ext = os.path.splitext(args.input)[-1].lower()
+    df = pd.read_excel(args.input) if ext in ['.xls', '.xlsx'] else pd.read_csv(args.input)
 
-    if not os.path.isfile(args.input):
-        print(f"[!] File not found: {args.input}")
-        sys.exit(1)
+    internal_subnets = load_internal_subnets(args.iplist, args.log)
 
-    output_dir = os.path.dirname(args.output)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    df = read_file_auto(args.input)
-
-    net = Network(height="800px", width="100%", bgcolor="#1e1e1e", font_color="white")
+    net = Network(height="900px", width="100%", bgcolor="#1e1e1e", font_color="white")
     G = nx.MultiDiGraph()
+    hit_counter = defaultdict(int)
+    ip_metadata = {}
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing Rows"):
-        try:
-            src_ip = str(row['Src IP']).strip()
-            dest_ip = str(row['Dest IP']).strip()
-            client_ip = str(row['Client IP Address']).strip()
-            server_ip = str(row['Server IP']).strip()
-            matched_ip = str(row.get('Matched IP', '')).strip()
-            threat_actor = str(row.get('Threat Actor', '')).strip()
+    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Processing Flows"):
+        src_ip = str(row.get('Src IP', '')).strip()
+        dst_ip = str(row.get('Dest IP', '')).strip()
+        src_cc = str(row.get('Src CC', '')).strip()
+        dst_cc = str(row.get('Dest CC', '')).strip()
+        client_ip = str(row.get('Client IP Address', '')).strip()
+        server_ip = str(row.get('Server IP', '')).strip()
+        matched_ip = str(row.get('Matched IP', '')).strip()
+        threat_actor = str(row.get('Threat Actor', '')).strip()
 
-            if not all([src_ip, dest_ip, client_ip, server_ip]):
-                continue
+        for ip in [src_ip, dst_ip, client_ip, server_ip, matched_ip]:
+            hit_counter[ip] += 1
 
-            G.add_node(src_ip, label=src_ip, title="Source IP", color="#6EC1E4")
-            G.add_node(dest_ip, label=dest_ip, title="Destination IP", color="#FF9F1C")
-            G.add_node(client_ip, label=client_ip, title="Client IP (Initiator)", color="#56E39F")
-            G.add_node(server_ip, label=server_ip, title="Server IP", color="#F6AE2D")
+        ip_roles = {}
+        for ip, role in [(client_ip, 'Client'), (server_ip, 'Server'), (src_ip, 'Src'), (dst_ip, 'Dest'), (matched_ip, 'Matched')]:
+            if ip and ip not in ip_roles:
+                ip_roles[ip] = role
 
-            if matched_ip:
-                G.add_node(matched_ip, label=matched_ip, title="Matched IP", color="#FF4040")
-            if threat_actor:
-                G.add_node(threat_actor, label=threat_actor, title="Threat Actor", color="#D7263D")
+        for ip, role in ip_roles.items():
+            cc = row.get(f'{role} CC', '') if f'{role} CC' in row else ''
+            hits = hit_counter[ip]
+            shape, color, status = 'dot', '#AAAAAA', ''
+            label = f"{ip}\n[{cc}]" if cc else ip
 
-            G.add_edge(client_ip, server_ip, title="Client → Server", color="#56E39F")
-            G.add_edge(src_ip, dest_ip, title="Observed Flow", color="#AAAAAA")
+            if role == 'Client':
+                shape = 'triangle'
+                color = '#56E39F'
+                if ip_in_subnets(ip, internal_subnets):
+                    color = 'red'
+                    status = 'Compromised Client'
+            elif role == 'Server':
+                shape = 'star'
+                color = '#F6AE2D'
+                if ip_in_subnets(ip, internal_subnets):
+                    color = 'yellow'
+                    status = 'Targeted Server'
+            elif role == 'Src':
+                color = '#6EC1E4'
+            elif role == 'Dest':
+                color = '#FF9F1C'
+            elif role == 'Matched':
+                color = '#FF4040'
 
-            if threat_actor and matched_ip:
-                G.add_edge(threat_actor, matched_ip, title="Associated", color="#FF4040")
+            flags = []
+            if status:
+                flags.append(f"Status: {status}")
+            flags.append(f"Role: {role}")
+            flags.append(f"IP: {ip}")
+            flags.append(f"Country: {cc}")
+            flags.append(f"Hits: {hits}")
+            if ip == matched_ip and threat_actor:
+                flags.append("Flagged by Threat Actor")
 
-            ip_roles = {
-                "Client": client_ip,
-                "Src": src_ip,
-                "Dest": dest_ip,
-                "Server": server_ip
+            tooltip = "\n".join(flags)
+            G.add_node(ip, label=label, title=tooltip, color=color, shape=shape)
+            ip_metadata[ip] = {
+                "ip": ip,
+                "role": role,
+                "status": status,
+                "country": cc,
+                "hits": hits
             }
-            if matched_ip:
-                for role, ip in ip_roles.items():
-                    if matched_ip == ip:
-                        G.add_edge(matched_ip, ip, title=f"Matched as {role}", color="#FFD23F")
 
-        except Exception as e:
-            print(f"[-] Error processing row {idx}: {e}")
-            continue
+        if threat_actor:
+            G.add_node(threat_actor, label=threat_actor, title="Threat Actor", color="#D7263D", shape="box")
 
-    print(f"[+] Graph created. Nodes: {G.number_of_nodes()} | Edges: {G.number_of_edges()}")
+        if client_ip and server_ip:
+            if ip_in_subnets(client_ip, internal_subnets):
+                G.add_edge(client_ip, server_ip, color="red", title="Compromised Flow")
+            elif ip_in_subnets(server_ip, internal_subnets):
+                G.add_edge(client_ip, server_ip, color="orange", title="Targeted Flow")
+            else:
+                G.add_edge(client_ip, server_ip, color="gray", title="General Flow")
 
-    try:
-        net.from_nx(G)
-        net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}}')
-        net.save_graph(args.output)
-        inject_legend(args.output)
-        if os.path.exists(args.output):
-            print(f"[+] ✅ File successfully saved: {args.output}")
-        else:
-            print(f"[!] ❌ File save failed: {args.output} not found!")
-    except Exception as e:
-        print(f"[!] Failed to render graph: {e}")
+        if threat_actor and matched_ip:
+            G.add_edge(threat_actor, matched_ip, color="#FF4040", title="Associated")
+
+    if G.number_of_nodes() == 0:
+        print("[!] Graph is empty.")
         sys.exit(1)
+
+    net.from_nx(G)
+    net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}}')
+    net.save_graph(args.output)
+    inject_legend(args.output)
+    with open(args.meta, 'w') as meta_out:
+        json.dump(ip_metadata, meta_out, indent=2)
+    print(f"[+] Graph saved: {args.output}")
+    print(f"[+] Subnet log saved: {args.log}")
+    print(f"[+] IP metadata exported: {args.meta}")
+    webbrowser.open('file://' + os.path.realpath(args.output))
 
 if __name__ == "__main__":
     main()
