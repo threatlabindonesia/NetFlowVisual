@@ -1,4 +1,3 @@
-
 import pandas as pd
 import networkx as nx
 from pyvis.network import Network
@@ -48,10 +47,10 @@ def inject_legend(html_path):
     legend_html = (
         "<div id='custom-legend' style='"
         "position: absolute; top: 20px; left: 20px; background-color: rgba(30,30,30,0.85);"
-        "color: white; padding: 12px; border-radius: 10px; font-size: 14px;"
+        "color: white; padding: 12px; border-radius: 10px; font-size: 14px; "
         "z-index: 1000; font-family: Arial, sans-serif;'>"
         "🧭 <b>Legend</b><br>"
-        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised [Outgoing Connection from Internal] </span></div>"
+        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised [Outgoing Connection from Internal]</span></div>"
         "<div>🎯 <span style='color:yellow;'>Targeted [External to Internal]</span></div>"
         "<div><span style='color:#56E39F;'>▲</span> Client IP</div>"
         "<div><span style='color:#F6AE2D;'>★</span> Server IP</div>"
@@ -163,21 +162,21 @@ def main():
 
         if client_ip and server_ip:
             if ip_in_subnets(client_ip, internal_subnets):
-                G.add_edge(client_ip, server_ip, color="red", title="Compromised Flow")
+                G.add_edge(client_ip, server_ip, color="red", title="Compromised Flow", width=3, physics=True, smooth=True, arrows="to")
             elif ip_in_subnets(server_ip, internal_subnets):
-                G.add_edge(client_ip, server_ip, color="orange", title="Targeted Flow")
+                G.add_edge(client_ip, server_ip, color="orange", title="Targeted Flow", width=3, physics=True, smooth=True, arrows="to")
             else:
-                G.add_edge(client_ip, server_ip, color="gray", title="General Flow")
+                G.add_edge(client_ip, server_ip, color="gray", title="General Flow", width=1, arrows="to")
 
         if threat_actor and matched_ip:
-            G.add_edge(threat_actor, matched_ip, color="#FF4040", title="Associated")
+            G.add_edge(threat_actor, matched_ip, color="#FF4040", title="Associated", width=2, arrows="none")  # No arrows for Associated edges
 
     if G.number_of_nodes() == 0:
         print("[!] Graph is empty.")
         sys.exit(1)
 
     net.from_nx(G)
-    net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}}')
+    net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}, "edges": {"smooth": {"type": "dynamic"}}}')
     net.save_graph(args.output)
     inject_legend(args.output)
     with open(args.meta, 'w') as meta_out:
