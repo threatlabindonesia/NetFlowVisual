@@ -12,13 +12,13 @@ import json
 
 def banner():
     print(r"""
-███╗   ███╗ █████╗ ██████╗ ██╗ ██████╗
-████╗ ████║██╔══██╗██╔══██╗██║██╔════╝
+███╗   ███╗ █████╗ ██████╗ ██╗ ██████╗ 
+████╗ ████║██╔══██╗██╔══██╗██║██╔════╝ 
 ██╔████╔██║███████║██║  ██║██║██║  ███╗
 ██║╚██╔╝██║██╔══██║██║  ██║██║██║   ██║
 ██║ ╚═╝ ██║██║  ██║██████╔╝██║╚██████╔╝
-╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝ ╚═════╝
-Netflow Graph Visualizer - Om Apip
+╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝ ╚═════╝ 
+   Netflow Graph Visualizer - Om Apip
 """)
 
 def load_internal_subnets(iplist_path, log_path):
@@ -47,11 +47,11 @@ def inject_legend(html_path):
     legend_html = (
         "<div id='custom-legend' style='"
         "position: absolute; top: 20px; left: 20px; background-color: rgba(30,30,30,0.85);"
-        "color: white; padding: 12px; border-radius: 10px; font-size: 14px; "
+        "color: white; padding: 12px; border-radius: 10px; font-size: 14px;"
         "z-index: 1000; font-family: Arial, sans-serif;'>"
         "🧭 <b>Legend</b><br>"
-        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised [Outgoing Connection from Internal]</span></div>"
-        "<div>🎯 <span style='color:yellow;'>Targeted [External to Internal]</span></div>"
+        "<div style='margin-top:5px;'>🔥 <span style='color:red;'>Compromised Client</span></div>"
+        "<div>🎯 <span style='color:yellow;'>Targeted Server</span></div>"
         "<div><span style='color:#56E39F;'>▲</span> Client IP</div>"
         "<div><span style='color:#F6AE2D;'>★</span> Server IP</div>"
         "<div><span style='color:#6EC1E4;'>■</span> Src IP</div>"
@@ -111,25 +111,22 @@ def main():
 
         for ip, role in ip_roles.items():
             cc = row.get(f'{role} CC', '') if f'{role} CC' in row else ''
-            flag = f"\n[{cc}]" if len(cc) == 2 and cc.isalpha() else ''
             hits = hit_counter[ip]
-            shape, color, status, label_prefix = 'dot', '#AAAAAA', '', ''
-            label = f"{label_prefix}{ip}".strip()
+            shape, color, status = 'dot', '#AAAAAA', ''
+            label = f"{ip}\n[{cc}]" if cc else ip
 
             if role == 'Client':
                 shape = 'triangle'
                 color = '#56E39F'
                 if ip_in_subnets(ip, internal_subnets):
                     color = 'red'
-                    status = 'Compromised'
-                    label_prefix = '🔥 '
+                    status = 'Compromised Client'
             elif role == 'Server':
                 shape = 'star'
                 color = '#F6AE2D'
                 if ip_in_subnets(ip, internal_subnets):
                     color = 'yellow'
-                    status = 'Targeted'
-                    label_prefix = '🎯 '
+                    status = 'Targeted Server'
             elif role == 'Src':
                 color = '#6EC1E4'
             elif role == 'Dest':
@@ -148,7 +145,7 @@ def main():
                 flags.append("Flagged by Threat Actor")
 
             tooltip = "\n".join(flags)
-            G.add_node(ip, label=label_prefix + label + flag, title=tooltip, color=color, shape=shape)
+            G.add_node(ip, label=label, title=tooltip, color=color, shape=shape)
             ip_metadata[ip] = {
                 "ip": ip,
                 "role": role,
@@ -162,21 +159,21 @@ def main():
 
         if client_ip and server_ip:
             if ip_in_subnets(client_ip, internal_subnets):
-                G.add_edge(client_ip, server_ip, color="red", title="Compromised Flow", width=3, physics=True, smooth=True, arrows="to")
+                G.add_edge(client_ip, server_ip, color="red", title="Compromised Flow")
             elif ip_in_subnets(server_ip, internal_subnets):
-                G.add_edge(client_ip, server_ip, color="orange", title="Targeted Flow", width=3, physics=True, smooth=True, arrows="to")
+                G.add_edge(client_ip, server_ip, color="orange", title="Targeted Flow")
             else:
-                G.add_edge(client_ip, server_ip, color="gray", title="General Flow", width=1, arrows="to")
+                G.add_edge(client_ip, server_ip, color="gray", title="General Flow")
 
         if threat_actor and matched_ip:
-            G.add_edge(threat_actor, matched_ip, color="#FF4040", title="Associated", width=2, arrows="none")  # No arrows for Associated edges
+            G.add_edge(threat_actor, matched_ip, color="red", title="Associated")
 
     if G.number_of_nodes() == 0:
         print("[!] Graph is empty.")
         sys.exit(1)
 
     net.from_nx(G)
-    net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}, "edges": {"smooth": {"type": "dynamic"}}}')
+    net.set_options('{"physics": {"stabilization": {"iterations": 1000}, "barnesHut": {"gravitationalConstant": -2000}}, "layout": {"improvedLayout": true}}')
     net.save_graph(args.output)
     inject_legend(args.output)
     with open(args.meta, 'w') as meta_out:
